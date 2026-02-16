@@ -199,6 +199,7 @@ async function handleNonStreamingResponse(
     let finalResult: ClaudeCliResult | null = null;
 
     subprocess.on("result", (result: ClaudeCliResult) => {
+      
       finalResult = result;
     });
 

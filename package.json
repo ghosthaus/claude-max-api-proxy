@@ -1,68 +1,39 @@
 {
   "name": "claude-max-api-proxy",
   "version": "1.0.0",
-  "description": "Use your Claude Max subscription with any OpenAI-compatible client. Wraps Claude Code CLI as an OpenAI-compatible API server.",
+  "description": "OpenAI-compatible API proxy for Claude Max subscription via Claude Code CLI",
   "type": "module",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "bin": {
-    "claude-max-api": "dist/server/standalone.js"
+    "claude-max-proxy": "dist/server/standalone.js"
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
     "start": "node dist/server/standalone.js",
-    "test": "node --test dist/**/*.test.js",
-    "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [
-    "claude",
-    "anthropic",
-    "claude-code",
-    "claude-max",
-    "openai-compatible",
-    "api-server",
-    "oauth",
-    "clawdbot",
-    "llm",
-    "ai"
-  ],
-  "author": "Atal Ashutosh",
+  "keywords": ["claude", "openai", "api", "proxy", "clawdbot"],
+  "author": "Ghost Works",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/atalovesyou/claude-max-api-proxy"
-  },
-  "bugs": {
-    "url": "https://github.com/atalovesyou/claude-max-api-proxy/issues"
-  },
-  "homepage": "https://github.com/atalovesyou/claude-max-api-proxy#readme",
   "dependencies": {
-    "express": "^4.21.2",
-    "uuid": "^11.0.5"
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.10.7",
-    "@types/uuid": "^10.0.0",
-    "typescript": "^5.7.3"
-  },
-  "peerDependencies": {
-    "clawdbot": ">=2026.1.0"
-  },
-  "peerDependenciesMeta": {
-    "clawdbot": {
-      "optional": true
-    }
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.2"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18.0.0"
   },
-  "files": [
-    "dist",
-    "docs",
-    "README.md",
-    "CONTRIBUTING.md"
-  ]
+  "peerDependencies": {
+    "expect": "*"
+  },
+  "peerDependenciesMeta": {
+    "expect": {
+      "optional": false
+    }
+  }
 }

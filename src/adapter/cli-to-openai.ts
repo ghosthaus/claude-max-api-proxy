@@ -70,9 +70,10 @@ export function cliResultToOpenai(
   requestId: string
 ): OpenAIChatResponse {
   // Get model from modelUsage or default
-  const modelName = result.modelUsage
-    ? Object.keys(result.modelUsage)[0]
-    : "claude-sonnet-4";
+  let modelName = "claude-sonnet-4";
+  if (result.modelUsage && Object.keys(result.modelUsage).length > 0) {
+    modelName = Object.keys(result.modelUsage)[0] || "claude-sonnet-4";
+  }
 
   return {
     id: `chatcmpl-${requestId}`,
@@ -102,7 +103,8 @@ export function cliResultToOpenai(
  * Normalize Claude model names to a consistent format
  * e.g., "claude-sonnet-4-5-20250929" -> "claude-sonnet-4"
  */
-function normalizeModelName(model: string): string {
+function normalizeModelName(model: string | undefined): string {
+  if (!model) return "claude-sonnet-4"; // Default fallback
   if (model.includes("opus")) return "claude-opus-4";
   if (model.includes("sonnet")) return "claude-sonnet-4";
   if (model.includes("haiku")) return "claude-haiku-4";
