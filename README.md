@@ -58,14 +58,14 @@ The server will start at `http://localhost:3456`
 curl http://localhost:3456/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "claude-sonnet-4",
+    "model": "claude-opus-4",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
 ### Available Models
 - `claude-opus-4` — Most capable (reasoning-enabled)
-- `claude-sonnet-4` — Balanced (default)
+- `claude-opus-4` — Balanced (default)
 - `claude-haiku-4` — Fastest
 
 ## Clawdbot Integration
@@ -81,7 +81,7 @@ models:
       api: openai-completions
       authHeader: false
       models:
-        - id: claude-sonnet-4
+        - id: claude-opus-4
           name: Claude Sonnet 4 (Max)
           contextWindow: 200000
           maxTokens: 8192
@@ -92,7 +92,7 @@ models:
           reasoning: true
 ```
 
-Then set your agent to use `claude-max/claude-sonnet-4`.
+Then set your agent to use `claude-max/claude-opus-4`.
 
 ## Running as a Background Service
 

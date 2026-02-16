@@ -4,7 +4,7 @@
 
 import type { OpenAIChatRequest } from "../types/openai.js";
 
-export type ClaudeModel = "opus" | "sonnet" | "haiku";
+export type ClaudeModel = "opus" | "opus" | "haiku";
 
 export interface CliInput {
   prompt: string;
@@ -15,15 +15,15 @@ export interface CliInput {
 const MODEL_MAP: Record<string, ClaudeModel> = {
   // Direct model names
   "claude-opus-4": "opus",
-  "claude-sonnet-4": "sonnet",
+  "claude-opus-4": "opus",
   "claude-haiku-4": "haiku",
   // With provider prefix
   "claude-code-cli/claude-opus-4": "opus",
-  "claude-code-cli/claude-sonnet-4": "sonnet",
+  "claude-code-cli/claude-opus-4": "opus",
   "claude-code-cli/claude-haiku-4": "haiku",
   // Aliases
   "opus": "opus",
-  "sonnet": "sonnet",
+  "opus": "opus",
   "haiku": "haiku",
 };
 
