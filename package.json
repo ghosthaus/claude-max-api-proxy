@@ -1,7 +1,7 @@
 {
   "name": "claude-max-api-proxy",
   "version": "1.0.0",
-  "description": "OpenAI-compatible API proxy for Claude Max subscription via Claude Code CLI",
+  "description": "OpenAI-compatible API proxy for Claude Max subscription - use Claude Opus with Agent Zero and other tools",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -12,7 +12,7 @@
     "start": "node dist/server/standalone.js",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["claude", "openai", "api", "proxy", "clawdbot"],
+  "keywords": ["claude", "openai", "api", "proxy", "agent-zero", "anthropic", "claude-max"],
   "author": "Ghost Works",
   "license": "MIT",
   "dependencies": {
@@ -28,12 +28,9 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "peerDependencies": {
-    "expect": "*"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ghosthaus/claude-max-api-proxy.git"
   },
-  "peerDependenciesMeta": {
-    "expect": {
-      "optional": false
-    }
-  }
+  "homepage": "https://github.com/ghosthaus/claude-max-api-proxy#readme"
 }

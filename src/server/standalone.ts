@@ -1,20 +1,16 @@
 #!/usr/bin/env node
 /**
- * Standalone server for testing without Clawdbot
- *
- * Usage:
- *   npm run start
- *   # or
- *   node dist/server/standalone.js [port]
+ * Standalone server for Claude Max API Proxy
+ * Uses OAuth credentials from Claude CLI to call Anthropic API directly
  */
 
 import { startServer, stopServer } from "./index.js";
-import { verifyClaude, verifyAuth } from "../subprocess/manager.js";
+import { verifyCredentials } from "../anthropic/client.js";
 
 const DEFAULT_PORT = 3456;
 
 async function main(): Promise<void> {
-  console.log("Claude Code CLI Provider - Standalone Server");
+  console.log("Claude Max API Proxy - Direct Anthropic API");
   console.log("============================================\n");
 
   // Parse port from command line
@@ -24,24 +20,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Verify Claude CLI
-  console.log("Checking Claude CLI...");
-  const cliCheck = await verifyClaude();
-  if (!cliCheck.ok) {
-    console.error(`Error: ${cliCheck.error}`);
-    process.exit(1);
-  }
-  console.log(`  Claude CLI: ${cliCheck.version || "OK"}`);
-
-  // Verify authentication
-  console.log("Checking authentication...");
-  const authCheck = await verifyAuth();
+  // Verify OAuth credentials
+  console.log("Checking Claude CLI credentials...");
+  const authCheck = verifyCredentials();
   if (!authCheck.ok) {
     console.error(`Error: ${authCheck.error}`);
     console.error("Please run: claude auth login");
     process.exit(1);
   }
-  console.log("  Authentication: OK\n");
+  
+  const expiresIn = authCheck.expiresAt 
+    ? Math.round((authCheck.expiresAt - Date.now()) / 1000 / 60)
+    : "unknown";
+  console.log(`  Credentials: OK (expires in ${expiresIn} minutes)\n`);
 
   // Start server
   try {

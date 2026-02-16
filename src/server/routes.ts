@@ -1,24 +1,61 @@
 /**
  * API Route Handlers
  *
- * Implements OpenAI-compatible endpoints for Clawdbot integration
+ * Implements OpenAI-compatible endpoints using direct Anthropic API
  */
 
 import type { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { ClaudeSubprocess } from "../subprocess/manager.js";
-import { openaiToCli } from "../adapter/openai-to-cli.js";
-import {
-  cliResultToOpenai,
-  createDoneChunk,
-} from "../adapter/cli-to-openai.js";
+import { callAnthropic, callAnthropicStream, AnthropicMessage } from "../anthropic/client.js";
 import type { OpenAIChatRequest } from "../types/openai.js";
-import type { ClaudeCliAssistant, ClaudeCliResult, ClaudeCliStreamEvent } from "../types/claude-cli.js";
+
+const logRequest = (body: OpenAIChatRequest) => {
+  const timestamp = new Date().toISOString();
+  const model = body.model || 'unknown';
+  const msgCount = body.messages?.length || 0;
+  const lastMsg = body.messages?.[body.messages.length - 1];
+  const preview = lastMsg?.content?.slice(0, 100) || '';
+  const stream = body.stream ? 'STREAM' : 'non-stream';
+  console.log(`[${timestamp}] Request: model=${model} ${stream} messages=${msgCount} last="${preview}..."`);
+};
+
+const logResponse = (requestId: string, content: string) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] Response ${requestId}: "${content.slice(0, 100)}..."`);
+};
+
+/**
+ * Convert OpenAI messages to Anthropic format
+ */
+function convertMessages(messages: OpenAIChatRequest["messages"]): { 
+  system?: string; 
+  messages: AnthropicMessage[] 
+} {
+  let system: string | undefined;
+  const anthropicMessages: AnthropicMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      // Anthropic uses system as a separate field
+      system = system ? `${system}\n\n${msg.content}` : msg.content;
+    } else if (msg.role === "user" || msg.role === "assistant") {
+      anthropicMessages.push({
+        role: msg.role,
+        content: msg.content,
+      });
+    }
+  }
+
+  // Ensure conversation starts with user message
+  if (anthropicMessages.length > 0 && anthropicMessages[0].role === "assistant") {
+    anthropicMessages.unshift({ role: "user", content: "(continue)" });
+  }
+
+  return { system, messages: anthropicMessages };
+}
 
 /**
  * Handle POST /v1/chat/completions
- *
- * Main endpoint for chat requests, supports both streaming and non-streaming
  */
 export async function handleChatCompletions(
   req: Request,
@@ -27,6 +64,8 @@ export async function handleChatCompletions(
   const requestId = uuidv4().replace(/-/g, "").slice(0, 24);
   const body = req.body as OpenAIChatRequest;
   const stream = body.stream === true;
+  
+  logRequest(body);
 
   try {
     // Validate request
@@ -41,14 +80,12 @@ export async function handleChatCompletions(
       return;
     }
 
-    // Convert to CLI input format
-    const cliInput = openaiToCli(body);
-    const subprocess = new ClaudeSubprocess();
+    const { system, messages } = convertMessages(body.messages);
 
     if (stream) {
-      await handleStreamingResponse(req, res, subprocess, cliInput, requestId);
+      await handleStreamingResponse(res, requestId, body.model, system, messages);
     } else {
-      await handleNonStreamingResponse(res, subprocess, cliInput, requestId);
+      await handleNonStreamingResponse(res, requestId, body.model, system, messages);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -68,122 +105,82 @@ export async function handleChatCompletions(
 
 /**
  * Handle streaming response (SSE)
- *
- * IMPORTANT: The Express req.on("close") event fires when the request body
- * is fully received, NOT when the client disconnects. For SSE connections,
- * we use res.on("close") to detect actual client disconnection.
  */
 async function handleStreamingResponse(
-  req: Request,
   res: Response,
-  subprocess: ClaudeSubprocess,
-  cliInput: ReturnType<typeof openaiToCli>,
-  requestId: string
+  requestId: string,
+  model: string,
+  system: string | undefined,
+  messages: AnthropicMessage[]
 ): Promise<void> {
   // Set SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Request-Id", requestId);
-
-  // CRITICAL: Flush headers immediately to establish SSE connection
-  // Without this, headers are buffered and client times out waiting
   res.flushHeaders();
 
-  // Send initial comment to confirm connection is alive
+  // Send initial comment
   res.write(":ok\n\n");
 
-  return new Promise<void>((resolve, reject) => {
-    let isFirst = true;
-    let lastModel = "claude-sonnet-4";
-    let isComplete = false;
+  let isFirst = true;
+  let fullText = "";
 
-    // Handle actual client disconnect (response stream closed)
-    res.on("close", () => {
-      if (!isComplete) {
-        // Client disconnected before response completed - kill subprocess
-        subprocess.kill();
-      }
-      resolve();
-    });
+  try {
+    await callAnthropicStream(
+      { model, messages, max_tokens: 8192, system },
+      // onChunk
+      (text: string) => {
+        fullText += text;
+        
+        if (isFirst) {
+          // Send role chunk
+          res.write(`data: ${JSON.stringify({
+            id: `chatcmpl-${requestId}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+          })}\n\n`);
+          isFirst = false;
+        }
 
-    // Handle streaming content deltas
-    subprocess.on("content_delta", (event: ClaudeCliStreamEvent) => {
-      const text = event.event.delta?.text || "";
-      if (text && !res.writableEnded) {
-        const chunk = {
+        // Send content chunk
+        res.write(`data: ${JSON.stringify({
           id: `chatcmpl-${requestId}`,
           object: "chat.completion.chunk",
           created: Math.floor(Date.now() / 1000),
-          model: lastModel,
-          choices: [{
-            index: 0,
-            delta: {
-              role: isFirst ? "assistant" : undefined,
-              content: text,
-            },
-            finish_reason: null,
-          }],
-        };
-        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        isFirst = false;
-      }
-    });
-
-    // Handle final assistant message (for model name)
-    subprocess.on("assistant", (message: ClaudeCliAssistant) => {
-      lastModel = message.message.model;
-    });
-
-    subprocess.on("result", (_result: ClaudeCliResult) => {
-      isComplete = true;
-      if (!res.writableEnded) {
-        // Send final done chunk with finish_reason
-        const doneChunk = createDoneChunk(requestId, lastModel);
-        res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
+          model,
+          choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
+        })}\n\n`);
+      },
+      // onDone
+      (result) => {
+        logResponse(requestId, fullText);
+        
+        // Send final chunk with finish_reason
+        res.write(`data: ${JSON.stringify({
+          id: `chatcmpl-${requestId}`,
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: result.model,
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        })}\n\n`);
         res.write("data: [DONE]\n\n");
         res.end();
       }
-      resolve();
-    });
-
-    subprocess.on("error", (error: Error) => {
-      console.error("[Streaming] Error:", error.message);
-      if (!res.writableEnded) {
-        res.write(
-          `data: ${JSON.stringify({
-            error: { message: error.message, type: "server_error", code: null },
-          })}\n\n`
-        );
-        res.end();
-      }
-      resolve();
-    });
-
-    subprocess.on("close", (code: number | null) => {
-      // Subprocess exited - ensure response is closed
-      if (!res.writableEnded) {
-        if (code !== 0 && !isComplete) {
-          // Abnormal exit without result - send error
-          res.write(`data: ${JSON.stringify({
-            error: { message: `Process exited with code ${code}`, type: "server_error", code: null },
-          })}\n\n`);
-        }
-        res.write("data: [DONE]\n\n");
-        res.end();
-      }
-      resolve();
-    });
-
-    // Start the subprocess
-    subprocess.start(cliInput.prompt, {
-      model: cliInput.model,
-      sessionId: cliInput.sessionId,
-    }).catch((err) => {
-      console.error("[Streaming] Subprocess start error:", err);
-      reject(err);
-    });
-  });
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[Streaming] Error:", message);
+    
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({
+        error: { message, type: "server_error", code: null },
+      })}\n\n`);
+      res.end();
+    }
+  }
 }
 
 /**
@@ -191,68 +188,58 @@ async function handleStreamingResponse(
  */
 async function handleNonStreamingResponse(
   res: Response,
-  subprocess: ClaudeSubprocess,
-  cliInput: ReturnType<typeof openaiToCli>,
-  requestId: string
+  requestId: string,
+  model: string,
+  system: string | undefined,
+  messages: AnthropicMessage[]
 ): Promise<void> {
-  return new Promise((resolve) => {
-    let finalResult: ClaudeCliResult | null = null;
+  try {
+    const result = await callAnthropic({ model, messages, max_tokens: 8192, system });
+    
+    const content = result.content
+      .filter(c => c.type === "text")
+      .map(c => c.text)
+      .join("");
 
-    subprocess.on("result", (result: ClaudeCliResult) => {
-      
-      finalResult = result;
-    });
+    logResponse(requestId, content);
 
-    subprocess.on("error", (error: Error) => {
-      console.error("[NonStreaming] Error:", error.message);
-      res.status(500).json({
-        error: {
-          message: error.message,
-          type: "server_error",
-          code: null,
+    res.json({
+      id: `chatcmpl-${requestId}`,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: result.model,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content,
+          },
+          finish_reason: "stop",
         },
-      });
-      resolve();
+      ],
+      usage: {
+        prompt_tokens: result.usage.input_tokens,
+        completion_tokens: result.usage.output_tokens,
+        total_tokens: result.usage.input_tokens + result.usage.output_tokens,
+      },
     });
-
-    subprocess.on("close", (code: number | null) => {
-      if (finalResult) {
-        res.json(cliResultToOpenai(finalResult, requestId));
-      } else if (!res.headersSent) {
-        res.status(500).json({
-          error: {
-            message: `Claude CLI exited with code ${code} without response`,
-            type: "server_error",
-            code: null,
-          },
-        });
-      }
-      resolve();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[NonStreaming] Error:", message);
+    
+    res.status(500).json({
+      error: {
+        message,
+        type: "server_error",
+        code: null,
+      },
     });
-
-    // Start the subprocess
-    subprocess
-      .start(cliInput.prompt, {
-        model: cliInput.model,
-        sessionId: cliInput.sessionId,
-      })
-      .catch((error) => {
-        res.status(500).json({
-          error: {
-            message: error.message,
-            type: "server_error",
-            code: null,
-          },
-        });
-        resolve();
-      });
-  });
+  }
 }
 
 /**
  * Handle GET /v1/models
- *
- * Returns available models
  */
 export function handleModels(_req: Request, res: Response): void {
   res.json({
@@ -282,13 +269,11 @@ export function handleModels(_req: Request, res: Response): void {
 
 /**
  * Handle GET /health
- *
- * Health check endpoint
  */
 export function handleHealth(_req: Request, res: Response): void {
   res.json({
     status: "ok",
-    provider: "claude-code-cli",
+    provider: "anthropic-oauth",
     timestamp: new Date().toISOString(),
   });
 }
